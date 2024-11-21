@@ -16,6 +16,7 @@ class CommonError:
     # video相关错误
     VIDEO_SEND_ERROR = "发送视频失败"
     VIDEO_WRITE_ERROR = "视频写入失败"
+    VIDEO_READ_ERROR = "视频读取失败"
 
     # 指令执行相关错误
     PROCESS_EXE_ERROR = "指令执行异常"
@@ -59,7 +60,7 @@ class PreDefine:
     #发送100帧视频的文件名
     @staticmethod
     def FILENAME(oriVideoNameWithoutSuffix,segmentIndex,frameIndex):
-        return "prediction"/"detail"/f"{oriVideoNameWithoutSuffix}"/f"centered_segment_{segmentIndex}_frame_{frameIndex}.mp4"
+        return f"prediction/detail/{oriVideoNameWithoutSuffix}/centered_segment_{segmentIndex}_frame_{frameIndex}.mp4"
 
     @staticmethod
     def DatetimeUtil():

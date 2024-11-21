@@ -1,111 +1,70 @@
-import atexit
+import base64
+import logging
+import os
 import threading
 from flask import Flask, session
-from app import mvsdk, CameraUtil
-from app.common import PreDefine, CommonError
-from app.exceptions import TennisError
-from app.models import Result
 from flask_socketio import SocketIO
-import logging
 import cv2 as cv
-import base64
-import os
-import sys
-import numpy as np
 from TennisV3.d3 import read_video, run_inference
-from multiprocessing import Queue
-from TennisV3.Model_Loader import ModelLoader
-from app.mvsdk import CameraGetImageBuffer
-from app.routes import http_bp, hCamera
+from app import mvsdk
 from app.CameraUtil import get_info
+from multiprocessing import Queue
+import numpy as np
+from app.common import CommonError, PreDefine
+from app.exceptions import TennisError
+from app.mvsdk import CameraGetImageBuffer
+from app._init_ import create_app,model_loader,tracknet,param_dict,bounce_detector,court_detector
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-app = Flask(__name__)
-# 初始化 SocketIO 对象，并将 Flask 应用实例传递给它
-socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")  # 允许跨域
-
-# 算法模型导入
-model_loader = None
-tracknet, param_dict = None, None
-bounce_detector = None
-court_detector = None
-
-
-def create_app():
-    global model_loader
-    global tracknet
-    global param_dict
-    global bounce_detector
-    global court_detector
-    global socketio
-    app.config.from_object('config.Config')
-
-    # app上下文
-    app_context = app.app_context()
-    app_context.push()
-
-    # 注册蓝图
-    app.register_blueprint(http_bp)
-
-    # app.logger.debug(app.url_map)
-
-    # 配置日志记录
-    logging.basicConfig(level=logging.DEBUG,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                        datefmt='%m/%d/%Y %I:%M:%S %p')
-    # 加载模型
-    model_loader = ModelLoader()
-    # 加载 TrackNet、BounceDetector 和 CourtDetector 模型
-    tracknet, param_dict = model_loader.load_tracknet_model('TennisV3/ckpts/TrackNet_best.pt')
-    bounce_detector = model_loader.load_bounce_detector('TennisV3/ckpts/bounce_detection_pretrained.cbm')
-    court_detector = model_loader.load_court_detector('TennisV3/ckpts/court_detection_pretrained.pt')
-
-    # 全局异常处理器
-    @app.errorhandler(Exception)
-    def handle_exception(e):
-        app.logger.info("[系统异常]%s", e)
-        return Result.error(str(e))
-
-    @app.errorhandler(TennisError)
-    def handle_exception(e):
-        app.logger.info(e.message)
-        return Result.error(e.message)
-
-    def release_camera():
-        app.logger.debug('Camera released')
-        CameraUtil.close_camera()
-
-    atexit.register(release_camera)
-
-    return app, socketio
-
+#flask实例
+app = create_app()
 
 # websocket接口
 
-# 此活动的session
+# 此活动的session(这个貌似没什么用？)
 active_session = []
 
+logger = logging.getLogger()
+
+# 初始化 SocketIO 对象，并将 Flask 应用实例传递给它
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*",logger=True)  # 允许跨域
+
+# 算法模型导入(从project中导入)
+# model_loader
+# tracknet, param_dict
+# bounce_detector
+# court_detector
+
+# 创建一个阻塞队列
+q = Queue()  # 使用上下文初始化队列
+
+# 获取视频的相关信息
+width = 1280
+height = 720
+fps = 100
+segment_duration = 1
+time = 10
+segment_number = 0
+hCamera = 0
 
 # 启动时，执行的操作
 @socketio.on('connect', namespace='/mapping')
 def handle_connect():
-    app.logger.info('Mapping is connected')
+    logger.info('Mapping is connected')
     active_session.append(session)
 
 
 # 使用websocket实现仲裁结果的推送
 @socketio.on('to_mapping', namespace='/mapping')
 def handle_message(message):
-    global tracknet
-    global param_dict
-    global bounce_detector
-    global court_detector
     global socketio
+
+    #获取视频信息(找到原视频)
     split = message.split("_")
     file_name = f'TennisV3/ori_video/{split[0]}_{split[1]}.avi'
     index = split[3]
     print(f"filename: {file_name} : index: {index}")
+
+    #进行算法处理
     video_path, image_path_list = run_inference(
         ori_video_file=file_name,  # 仲裁原视频Clip
         tracknet=tracknet,
@@ -121,12 +80,17 @@ def handle_message(message):
         segment_duration=8,  # 降采样的视频片段长度
         segment_video_frame_index=int(index),  # 仲裁降采样视频的bounce帧
         down_scale_rate=16)  # 降采样视频帧率
+
+    #发送视频和三张轨迹图
     send_map_result(video_path, image_path_list)
 
 
 def send_map_result(video_path, image_path_list):
+
     logging.info("开始发送视频和图片文件...")
+
     encoded_file = None
+
     # 获取文件名（不带路径和扩展名）
     video_name = os.path.basename(video_path)  # 获取带后缀的文件名
     video_name = video_name.rsplit('.', 1)[0]  # 去除扩展名
@@ -170,20 +134,7 @@ def handle_transport():
     pass
 
 
-# 降采集以及分析关键帧相关接口
-
-# 创建一个阻塞队列
-q = Queue()  # 使用上下文初始化队列
-
-# 获取视频的相关信息
-width = 1280
-height = 720
-fps = 100
-segment_duration = 1
-time = 10
-segment_number = 0
-hCamera = 0
-
+## 降采集以及分析关键帧相关接口 ##
 
 def record_process():
     global q
@@ -194,31 +145,46 @@ def record_process():
     global segment_number
     global hCamera
 
+    #从CameraUtil获取摄像机的相关信息
     hCamera, pFrameBuffer = get_info()
 
-    frame_size = (int(width), int(height))
+    #录制视频
     while hCamera > 0:
+        #视频录制路径
         output_file = os.path.join('TennisV3/ori_video/', f'segment_{segment_number}.avi')
         # writer = cv.VideoWriter(output_file, cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), fps, frame_size, True)
+
+        #视频提供的sdk，这里initRecord下面还需要stopRecord
         mvsdk.CameraInitRecord(hCamera, 0, output_file, 0, 60, 100)
+
+        #获得的每一帧直接存进来，然后传给handle进行算法计算
         segment_frames = []
+
+        #录制segment_duration秒的视频
         for i in range(int(fps * segment_duration)):
+
             frame_head = None
+
             try:
+                #GetImageBuffer之后要交给ImageProcess处理
                 phy_buffer, frame_head = CameraGetImageBuffer(hCamera, 200)
                 mvsdk.CameraImageProcess(hCamera, phy_buffer, pFrameBuffer, frame_head)
+
+                #一定要释放这个缓冲区以便摄像头去读取下一帧
                 mvsdk.CameraReleaseImageBuffer(hCamera, phy_buffer)
 
-                # 获取帧
+                # 获取帧,将获取的RAW格式图片变成opencv可使用的帧
                 frame_data = (mvsdk.c_ubyte * frame_head.uBytes).from_address(pFrameBuffer)
                 frame = np.frombuffer(frame_data, dtype=np.uint8)
                 frame = frame.reshape((frame_head.iHeight, frame_head.iWidth,
                                        1 if frame_head.uiMediaType == mvsdk.CAMERA_MEDIA_TYPE_MONO8 else 3))
 
                 segment_frames.append(frame)
-            except mvsdk.CameraException as e:
-                app.logger.debug("视频录制失败({}):{}".format(e.error_code, e.message))
 
+            except mvsdk.CameraException as e:
+                logger.debug("视频录制失败({}):{}".format(e.error_code, e.message))
+
+            #向文件中写入一帧
             mvsdk.CameraPushFrame(hCamera, pFrameBuffer, frame_head)
 
         mvsdk.CameraStopRecord(hCamera)
@@ -231,13 +197,11 @@ def record_process():
 def handle_process():
     global q
     global segment_number
-    global tracknet
-    global param_dict
-    global bounce_detector
     global hCamera
     index = 0
     while True:
         if not q.empty():
+            #从阻塞队列中取出需要处理的帧列表
             source = q.get()
             video_file, bounces = read_video(source, fps, index, tracknet, param_dict, bounce_detector)
             send_video(video_file, bounces)
@@ -245,15 +209,17 @@ def handle_process():
         elif hCamera <= 0:
             break
 
-
+#发送文件
 def send_video(path, bounces):
     global socketio
     print("start to send video")
+
     encoded_file = None
     # 获取文件名（不带路径和扩展名）
     video_name = os.path.basename(path)  # 获取带后缀的文件名
     video_name = video_name.rsplit('.', 1)[0]  # 去除扩展名
     print(video_name)
+
     if os.path.exists(path):  # 检查视频文件是否存在
         try:
             with open(path, 'rb') as file:  # 以二进制读取文件
@@ -272,13 +238,16 @@ def send_video(path, bounces):
         print("Error: Unable to open video file.")
         return
 
-    # 获取视频的总帧数
+    # 获取视频的总帧数，从视频中提取关键帧并转码
     total_frames = int(cap.get(cv.CAP_PROP_FRAME_COUNT))
+
     for index in bounces:  # 遍历目录中的文件
+
         # 检查 frame_index 是否在有效范围内
         if index >= total_frames or index < 0:
             print(f"Error: Invalid frame index. The video has {total_frames} frames.")
             return
+
         # 设置视频读取位置到指定帧
         cap.set(cv.CAP_PROP_POS_FRAMES, index)
         # 读取指定帧
@@ -290,6 +259,7 @@ def send_video(path, bounces):
         _, buffer = cv.imencode('.jpg', frame)  # 将帧编码为JPEG格式
         encoded_frame = base64.b64encode(buffer).decode('utf-8')  # 转为Base64字符串
         encoded_file += f"*frame_{index}*{encoded_frame}"
+
         # 释放资源
     cap.release()
 
@@ -301,7 +271,7 @@ def send_video(path, bounces):
 
 @socketio.on('connect', namespace='/predict')
 def handle_connect():
-    app.logger.info('Predict is connected')
+    logger.info('Predict is connected')
 
 
 # 录制视频以及降采集请求
@@ -311,26 +281,28 @@ def video_record(mode):
 
     #测试模式
     if mode == PreDefine.TEST_MODE:
+        #将一个100帧的视频传入进行测试
         path = os.path.join('TennisV3/ori_video/result100fps_16s.avi')
         cap = cv.VideoCapture(path)
+
         if not cap.isOpened():
             print("Error: Unable to open video file.")
             return
-        #获取视频总帧数
+
+        # 获取视频总帧数
         total_frames = int(cap.get(cv.CAP_PROP_FRAME_COUNT))
         segment_frames = []
 
-        #将每一帧存入数组中
+        # 将每一帧存入数组中
         for index in range(total_frames):
             ret, frame = cap.read()
             if not ret:
                 raise TennisError(CommonError.VIDEO_READ_ERROR)
             segment_frames.append(frame)
 
-        #将帧数组存入队列中
+            # 将帧数组存入队列中
         q.put(segment_frames)
         handle_process()
-
 
     #实时模式
     elif mode == PreDefine.REAL_TIME_MODE:
@@ -343,4 +315,5 @@ def video_record(mode):
         t1.join()
         t2.join()
 
-
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)

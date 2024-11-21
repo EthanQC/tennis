@@ -1,25 +1,26 @@
 import logging
-import platform
-from flask import Blueprint,Response,after_this_request
+import threading
+from flask import Blueprint,Response
 import cv2 as cv
 from app import mvsdk, CameraUtil
 from app.exceptions import TennisError
 from app.common import PreDefine, CommonError
-import numpy as np
 
 #使用HTTP协议请求
 http_bp = Blueprint('http_bp', __name__)
 
 logger = logging.getLogger()
 
-hCamera = 0
+Lock = threading.Lock()  # 在threading模块中获得锁类
 
-def send_video():
+def send_video(hCamera):
     if hCamera < 0:
         raise TennisError(CommonError.CAMERA_NOT_AVAILABLE)
     while True:
+        Lock.acquire()  # 设置锁
         frame = CameraUtil.grap()
         if frame is None:
+            Lock.release()  # 释放锁
             break
         else:
             # 将帧编码为 JPEG 格式
@@ -28,15 +29,18 @@ def send_video():
             # 构建响应体
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        Lock.release()  # 释放锁
 
 @http_bp.route('/video',methods=['GET'])
 def stream_video():
-    global hCamera
     logger.debug('==========stream_video=========')
     # 初始化摄像头
-    hCamera,pFrameBuffer=CameraUtil.init_camera()
+    hCamera=CameraUtil.init_camera()
+
+    video = threading.Thread(target=send_video,args=(hCamera,))
+    video.start()
     
-    return Response(send_video(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(send_video(hCamera), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @http_bp.route('/favicon.ico',methods=['GET'])
 def favicon():
