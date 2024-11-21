@@ -1,0 +1,4 @@
+Log file created at: 2024/11/15 21:14:30
+Running on machine: jetson
+Log line format: [IWEF]mmdd hh:mm:ss.uuuuuu threadid file:line] msg
+E1115 21:14:30.823385  5367 MVCAMAPI.cpp:369] CameraInit Failed, err:-18,Version:2.1.0.48,FriendlyName:HT-SUA202GC-T1V-C,SN:044052923005

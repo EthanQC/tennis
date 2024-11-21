@@ -1,0 +1,9 @@
+# 忽略所有 .pt 和 .avi 文件
+*.pt
+*.avi
+
+# 或者忽略具体路径的大文件
+TennisV3/ckpts/TrackNet_best.pt
+TennisV3/ori_video/result100fps_3min.avi
+
+venv/
