@@ -158,7 +158,17 @@ def predict_segment(video_file, tracknet, param_dict, bounce_detector):
     tracknet_pred_dict = {'Frame': [], 'X': [], 'Y': [], 'Visibility': [], 'Bounce': []}
     ball_track = []
 
-    for step, (i, x) in enumerate(tqdm(data_loader)):
+    # for step, (i, x) in enumerate(tqdm(data_loader)):
+    #     x = x.float().to(device)
+    #     with torch.no_grad():
+    #         y_pred = tracknet(x).detach().cpu()
+    #
+    #     tmp_pred, tmp_ball_track = predict(i, y_pred=y_pred, img_scaler=img_scaler)
+    #     ball_track.extend(tmp_ball_track)
+    #     for key in tmp_pred.keys():
+    #         tracknet_pred_dict[key].extend(tmp_pred[key])
+
+    for i, (i, x) in enumerate(data_loader):
         x = x.float().to(device)
         with torch.no_grad():
             y_pred = tracknet(x).detach().cpu()

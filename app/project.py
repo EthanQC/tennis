@@ -2,6 +2,7 @@ import atexit
 import threading
 from flask import Flask, session
 from app import mvsdk, CameraUtil
+from app.common import PreDefine, CommonError
 from app.exceptions import TennisError
 from app.models import Result
 from flask_socketio import SocketIO
@@ -307,11 +308,39 @@ def handle_connect():
 @socketio.on('video_record', namespace='/predict')
 def video_record(mode):
     print(f"mode: {mode}")
-    # 创建生产者线程
-    t1 = threading.Thread(target=record_process)
-    # 创建消费者线程
-    t2 = threading.Thread(target=handle_process)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
+
+    #测试模式
+    if mode == PreDefine.TEST_MODE:
+        path = os.path.join('TennisV3/ori_video/result100fps_16s.avi')
+        cap = cv.VideoCapture(path)
+        if not cap.isOpened():
+            print("Error: Unable to open video file.")
+            return
+        #获取视频总帧数
+        total_frames = int(cap.get(cv.CAP_PROP_FRAME_COUNT))
+        segment_frames = []
+
+        #将每一帧存入数组中
+        for index in range(total_frames):
+            ret, frame = cap.read()
+            if not ret:
+                raise TennisError(CommonError.VIDEO_READ_ERROR)
+            segment_frames.append(frame)
+
+        #将帧数组存入队列中
+        q.put(segment_frames)
+        handle_process()
+
+
+    #实时模式
+    elif mode == PreDefine.REAL_TIME_MODE:
+        # 创建生产者线程
+        t1 = threading.Thread(target=record_process)
+        # 创建消费者线程
+        t2 = threading.Thread(target=handle_process)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+
